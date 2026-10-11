@@ -9,3 +9,9 @@ Fabric mod (MC 26.3). Zips the world when it closes into a folder your cloud app
 ## Issues / PRs
 
 Bugs, questions and pull requests welcome: open an issue or PR on GitHub.
+
+## Modes
+
+`mode=mirror` (default): keeps one up-to-date copy at `MinecraftBackups/<world>/world/`, copying only changed files, so the cloud app uploads just those. Region files (`.mca`) are re-uploaded whole when any chunk in them changes. No history from CloudChest itself (Google Drive keeps file versions for a while).
+
+`mode=zip`: one timestamped zip per backup, last `keep` kept. Full upload every time.

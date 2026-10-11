@@ -5,6 +5,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Properties;
@@ -55,13 +56,19 @@ public class CloudChest implements ModInitializer {
 			Path dir = Path.of(dest.replaceFirst("^~", System.getProperty("user.home"))).resolve(name);
 			Files.createDirectories(dir);
 
-			String file = name + "-" + LocalDateTime.now().format(STAMP) + ".zip";
-			Path tmp = dir.resolve(file + ".part"); // cloud apps skip half-written files this way
-			zip(world, tmp);
-			Files.move(tmp, dir.resolve(file));
-			LOG.info("Backed up {} -> {}", name, dir.resolve(file));
-			notifier.accept("World backed up", name);
-			prune(dir, keep);
+			if (cfg.getProperty("mode", "mirror").trim().equals("zip")) {
+				String file = name + "-" + LocalDateTime.now().format(STAMP) + ".zip";
+				Path tmp = dir.resolve(file + ".part"); // cloud apps skip half-written files this way
+				zip(world, tmp);
+				Files.move(tmp, dir.resolve(file));
+				LOG.info("Backed up {} -> {}", name, dir.resolve(file));
+				notifier.accept("World backed up", name);
+				prune(dir, keep);
+			} else {
+				int changed = mirror(world, dir.resolve("world"));
+				LOG.info("Mirrored {} -> {} ({} files changed)", name, dir.resolve("world"), changed);
+				notifier.accept("World backed up", name + ": " + changed + " files changed");
+			}
 		} catch (Exception e) {
 			LOG.error("Backup failed", e);
 			notifier.accept("Backup failed", "See latest.log");
@@ -93,7 +100,9 @@ public class CloudChest implements ModInitializer {
 				#   Google Drive: ~/Library/CloudStorage/GoogleDrive-you@gmail.com/My Drive/MinecraftBackups
 				#   iCloud:       ~/Library/Mobile Documents/com~apple~CloudDocs/MinecraftBackups
 				destination=
-				# Zips kept per world; oldest deleted first
+				# mirror = copy only changed files (small uploads, no history). zip = full zip per backup.
+				mode=mirror
+				# zip mode only: zips kept per world, oldest deleted first
 				keep=10
 				""".replaceAll("(?m)^\t+", ""));
 		}
@@ -102,6 +111,32 @@ public class CloudChest implements ModInitializer {
 			props.load(in);
 		}
 		return props;
+	}
+
+	/** Copy only files whose size/mtime differ, delete files gone from the world. Returns files copied. */
+	static int mirror(Path world, Path out) throws IOException {
+		int copied = 0;
+		try (Stream<Path> files = Files.walk(world)) {
+			for (Path f : (Iterable<Path>) files.filter(Files::isRegularFile)::iterator) {
+				if (f.getFileName().toString().equals("session.lock")) continue;
+				Path t = out.resolve(world.relativize(f).toString());
+				if (Files.exists(t) && Files.size(t) == Files.size(f)
+					&& Files.getLastModifiedTime(t).equals(Files.getLastModifiedTime(f))) continue;
+				Files.createDirectories(t.getParent());
+				Path tmp = t.resolveSibling(t.getFileName() + ".part");
+				Files.copy(f, tmp, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.COPY_ATTRIBUTES);
+				Files.move(tmp, t, StandardCopyOption.REPLACE_EXISTING);
+				copied++;
+			}
+		}
+		if (Files.isDirectory(out)) {
+			try (Stream<Path> files = Files.walk(out)) {
+				for (Path t : (Iterable<Path>) files.filter(Files::isRegularFile)::iterator) {
+					if (Files.notExists(world.resolve(out.relativize(t).toString()))) Files.delete(t);
+				}
+			}
+		}
+		return copied;
 	}
 
 	static void zip(Path world, Path out) throws IOException {
