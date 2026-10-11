@@ -8,6 +8,7 @@ import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Properties;
+import java.util.function.BiConsumer;
 import java.util.stream.Stream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
@@ -27,6 +28,8 @@ import org.slf4j.LoggerFactory;
  */
 public class CloudChest implements ModInitializer {
 	static final Logger LOG = LoggerFactory.getLogger("cloudchest");
+	/** Set by the client entrypoint to show a toast; no-op on dedicated servers. */
+	static volatile BiConsumer<String, String> notifier = (title, msg) -> {};
 	static final DateTimeFormatter STAMP = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
 
 	@Override
@@ -43,6 +46,7 @@ public class CloudChest implements ModInitializer {
 			if (dest.isEmpty()) dest = detectCloudFolder();
 			if (dest == null) {
 				LOG.warn("No Google Drive/iCloud/Dropbox folder found; set destination in config/cloudchest.properties");
+				notifier.accept("Backup skipped", "No cloud folder found");
 				return;
 			}
 			int keep = Integer.parseInt(cfg.getProperty("keep", "10").trim());
@@ -56,9 +60,11 @@ public class CloudChest implements ModInitializer {
 			zip(world, tmp);
 			Files.move(tmp, dir.resolve(file));
 			LOG.info("Backed up {} -> {}", name, dir.resolve(file));
+			notifier.accept("World backed up", name);
 			prune(dir, keep);
 		} catch (Exception e) {
 			LOG.error("Backup failed", e);
+			notifier.accept("Backup failed", "See latest.log");
 		}
 	}
 

@@ -8,7 +8,8 @@
 	"license": "CC0-1.0",
 	"environment": "*",
 	"entrypoints": {
-		"main": ["dev.dikaizm.cloudchest.CloudChest"]
+		"main": ["dev.dikaizm.cloudchest.CloudChest"],
+		"client": ["dev.dikaizm.cloudchest.CloudChestClient"]
 	},
 	"depends": {
 		"fabricloader": ">=0.19.5",
