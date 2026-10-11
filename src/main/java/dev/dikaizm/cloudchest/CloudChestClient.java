@@ -10,7 +10,7 @@ public class CloudChestClient implements ClientModInitializer {
 	public void onInitializeClient() {
 		CloudChest.notifier = (title, msg) -> {
 			Minecraft mc = Minecraft.getInstance();
-			mc.execute(() -> SystemToast.add(mc.toastManager(), SystemToast.SystemToastId.PERIODIC_NOTIFICATION,
+			mc.execute(() -> SystemToast.add(mc.gui.toastManager(), SystemToast.SystemToastId.PERIODIC_NOTIFICATION,
 				Component.literal(title), Component.literal(msg)));
 		};
 	}
