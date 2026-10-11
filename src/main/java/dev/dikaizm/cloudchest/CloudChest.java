@@ -1,8 +1,11 @@
 package dev.dikaizm.cloudchest;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -11,6 +14,8 @@ import java.time.format.DateTimeFormatter;
 import java.util.Properties;
 import java.util.function.BiConsumer;
 import java.util.stream.Stream;
+import java.util.zip.GZIPInputStream;
+import java.util.zip.InflaterInputStream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -56,7 +61,9 @@ public class CloudChest implements ModInitializer {
 			Path dir = Path.of(dest.replaceFirst("^~", System.getProperty("user.home"))).resolve(name);
 			Files.createDirectories(dir);
 
-			if (cfg.getProperty("mode", "mirror").trim().equals("zip")) {
+			boolean zip = cfg.getProperty("mode", "mirror").trim().equals("zip");
+			verify(world, zip ? null : dir.resolve("world"));
+			if (zip) {
 				String file = name + "-" + LocalDateTime.now().format(STAMP) + ".zip";
 				Path tmp = dir.resolve(file + ".part"); // cloud apps skip half-written files this way
 				zip(world, tmp);
@@ -69,6 +76,9 @@ public class CloudChest implements ModInitializer {
 				LOG.info("Mirrored {} -> {} ({} files changed)", name, dir.resolve("world"), changed);
 				notifier.accept("World backed up", name + ": " + changed + " files changed");
 			}
+		} catch (Corrupt e) {
+			LOG.error("World looks corrupt, backup skipped (last good backup kept): {}", e.getMessage());
+			notifier.accept("Backup skipped: world corrupt", e.getMessage());
 		} catch (Exception e) {
 			LOG.error("Backup failed", e);
 			notifier.accept("Backup failed", "See latest.log");
@@ -113,6 +123,70 @@ public class CloudChest implements ModInitializer {
 		return props;
 	}
 
+	static class Corrupt extends IOException {
+		Corrupt(String msg) { super(msg); }
+	}
+
+	static boolean changed(Path f, Path t) throws IOException {
+		return Files.notExists(t) || Files.size(t) != Files.size(f)
+			|| !Files.getLastModifiedTime(t).equals(Files.getLastModifiedTime(f));
+	}
+
+	/**
+	 * Throws Corrupt if a file about to be backed up fails to parse, so a bad world never overwrites a good backup.
+	 * Mirror mode (out != null) checks only changed files; zip mode checks all.
+	 * Catches truncated/garbled region files and level.dat, not logical damage (valid-but-wrong data).
+	 */
+	static void verify(Path world, Path out) throws IOException {
+		try (Stream<Path> files = Files.walk(world)) {
+			for (Path f : (Iterable<Path>) files.filter(Files::isRegularFile)::iterator) {
+				String n = f.getFileName().toString();
+				if (out != null && !changed(f, out.resolve(world.relativize(f).toString()))) continue;
+				try {
+					if (n.endsWith(".mca")) checkRegion(f);
+					else if (n.equals("level.dat")) {
+						try (InputStream in = new GZIPInputStream(Files.newInputStream(f))) {
+							in.transferTo(OutputStream.nullOutputStream());
+						}
+					}
+				} catch (IOException e) {
+					throw new Corrupt(world.relativize(f) + ": " + e);
+				}
+			}
+		}
+	}
+
+	/** Region file: 8KB header (1024 chunk locations + timestamps), then 4KB sectors of [len][type][data]. */
+	static void checkRegion(Path f) throws IOException {
+		long size = Files.size(f);
+		if (size == 0) return; // vanilla leaves empty region files
+		if (size < 8192) throw new IOException("truncated header, " + size + " bytes");
+		try (FileChannel ch = FileChannel.open(f)) {
+			ByteBuffer locs = ByteBuffer.allocate(4096);
+			ch.read(locs, 0);
+			for (int i = 0; i < 1024; i++) {
+				int e = locs.getInt(i * 4);
+				if (e == 0) continue;
+				long off = (e >>> 8) & 0xFFFFFF;
+				int secs = e & 0xFF;
+				if (off < 2 || secs == 0 || (off + secs) * 4096L > size) throw new IOException("chunk " + i + " outside file (truncated?)");
+				ByteBuffer h = ByteBuffer.allocate(5);
+				ch.read(h, off * 4096);
+				int len = h.getInt(0), type = h.get(4);
+				if (len < 1 || len > secs * 4096L - 4) throw new IOException("chunk " + i + " bad length " + len);
+				if (type != 1 && type != 2) continue; // other/external compression: structure ok, skip payload
+				ByteBuffer data = ByteBuffer.allocate(len - 1);
+				ch.read(data, off * 4096 + 5);
+				InputStream raw = new ByteArrayInputStream(data.array());
+				try (InputStream in = type == 1 ? new GZIPInputStream(raw) : new InflaterInputStream(raw)) {
+					in.transferTo(OutputStream.nullOutputStream());
+				} catch (IOException x) {
+					throw new IOException("chunk " + i + " data unreadable: " + x.getMessage());
+				}
+			}
+		}
+	}
+
 	/** Copy only files whose size/mtime differ, delete files gone from the world. Returns files copied. */
 	static int mirror(Path world, Path out) throws IOException {
 		int copied = 0;
@@ -120,8 +194,7 @@ public class CloudChest implements ModInitializer {
 			for (Path f : (Iterable<Path>) files.filter(Files::isRegularFile)::iterator) {
 				if (f.getFileName().toString().equals("session.lock")) continue;
 				Path t = out.resolve(world.relativize(f).toString());
-				if (Files.exists(t) && Files.size(t) == Files.size(f)
-					&& Files.getLastModifiedTime(t).equals(Files.getLastModifiedTime(f))) continue;
+				if (!changed(f, t)) continue;
 				Files.createDirectories(t.getParent());
 				Path tmp = t.resolveSibling(t.getFileName() + ".part");
 				Files.copy(f, tmp, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.COPY_ATTRIBUTES);
