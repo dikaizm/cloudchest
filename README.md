@@ -3,8 +3,8 @@
 Fabric mod (MC 26.3). Zips the world when it closes into a folder your cloud app syncs.
 
 1. `JAVA_HOME=/opt/homebrew/opt/openjdk ./gradlew build` -> `build/libs/cloudchest-1.0.0.jar`
-2. Drop jar in instance `mods/` (needs Fabric API), launch once, quit.
-3. Set `destination=` in `config/cloudchest.properties`, play, quit -> zip appears.
+2. Drop jar in instance `mods/` (needs Fabric API), launch.
+3. Play, quit -> zip appears in `MinecraftBackups/` on Google Drive, iCloud or Dropbox (first one found). To pick another folder, set `destination=` in `config/cloudchest.properties`.
 
 ## Issues / PRs
 

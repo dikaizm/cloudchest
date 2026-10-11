@@ -40,8 +40,9 @@ public class CloudChest implements ModInitializer {
 		try {
 			Properties cfg = loadConfig();
 			String dest = cfg.getProperty("destination", "").trim();
-			if (dest.isEmpty()) {
-				LOG.warn("No destination set in config/cloudchest.properties, skipping backup");
+			if (dest.isEmpty()) dest = detectCloudFolder();
+			if (dest == null) {
+				LOG.warn("No Google Drive/iCloud/Dropbox folder found; set destination in config/cloudchest.properties");
 				return;
 			}
 			int keep = Integer.parseInt(cfg.getProperty("keep", "10").trim());
@@ -61,11 +62,28 @@ public class CloudChest implements ModInitializer {
 		}
 	}
 
+	/** First synced folder found: Google Drive, iCloud Drive, Dropbox. Null if none. */
+	static String detectCloudFolder() throws IOException {
+		Path home = Path.of(System.getProperty("user.home"));
+		Path cloud = home.resolve("Library/CloudStorage");
+		if (Files.isDirectory(cloud)) {
+			try (Stream<Path> s = Files.list(cloud)) {
+				var drive = s.filter(p -> p.getFileName().toString().startsWith("GoogleDrive-"))
+					.map(p -> p.resolve("My Drive")).filter(Files::isDirectory).findFirst();
+				if (drive.isPresent()) return drive.get().resolve("MinecraftBackups").toString();
+			}
+		}
+		for (String rel : new String[] {"Library/Mobile Documents/com~apple~CloudDocs", "Dropbox", "Google Drive/My Drive"}) {
+			if (Files.isDirectory(home.resolve(rel))) return home.resolve(rel).resolve("MinecraftBackups").toString();
+		}
+		return null;
+	}
+
 	static Properties loadConfig() throws IOException {
 		Path p = FabricLoader.getInstance().getConfigDir().resolve("cloudchest.properties");
 		if (Files.notExists(p)) {
 			Files.writeString(p, """
-				# Folder synced by your cloud app. Examples:
+				# Leave empty to auto-detect (Google Drive, then iCloud, then Dropbox). Or set a folder, e.g.:
 				#   Google Drive: ~/Library/CloudStorage/GoogleDrive-you@gmail.com/My Drive/MinecraftBackups
 				#   iCloud:       ~/Library/Mobile Documents/com~apple~CloudDocs/MinecraftBackups
 				destination=
