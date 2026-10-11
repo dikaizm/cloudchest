@@ -1,0 +1,18 @@
+{
+	"schemaVersion": 1,
+	"id": "cloudchest",
+	"version": "${version}",
+	"name": "CloudChest",
+	"description": "Zips the world into a cloud-synced folder (Google Drive, iCloud, Dropbox, ...) when it closes.",
+	"authors": ["dikaizm"],
+	"license": "CC0-1.0",
+	"environment": "*",
+	"entrypoints": {
+		"main": ["dev.dikaizm.cloudchest.CloudChest"]
+	},
+	"depends": {
+		"fabricloader": ">=0.19.5",
+		"minecraft": "~26.3",
+		"java": ">=25"
+	}
+}
